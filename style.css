@@ -26,3 +26,22 @@ button{cursor:pointer;border:0;border-radius:7px;padding:9px 12px;font-weight:70
 #containerBody{display:grid;grid-template-columns:1fr 1fr;gap:18px}.container-col{min-width:0}
 #help{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:8;font-size:11px;background:rgba(0,0,0,.3);padding:6px 10px;border-radius:6px;pointer-events:none}
 .nametag{font-size:12px}
+
+/* Semi-realistic visual pass */
+body{background:radial-gradient(circle at 50% 20%,#27313b,#090b0e 70%)}
+.panel{
+  background:linear-gradient(145deg,rgba(30,34,38,.97),rgba(14,16,19,.97));
+  border:1px solid rgba(255,255,255,.13);
+  box-shadow:0 22px 65px rgba(0,0,0,.62),inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter:blur(12px)
+}
+#stats,#chatLog,.hot{
+  backdrop-filter:blur(7px);
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 8px 24px rgba(0,0,0,.22)
+}
+.hot{background:linear-gradient(180deg,rgba(23,27,31,.78),rgba(6,8,10,.72))}
+.hot.sel{border-color:#f5e6bf;box-shadow:0 0 14px rgba(255,220,150,.28)}
+#crosshair{opacity:.86;text-shadow:0 0 6px rgba(0,0,0,.75)}
+#mineBar{height:7px;background:rgba(3,5,7,.72);border:1px solid rgba(255,255,255,.12)}
+#mineFill{background:linear-gradient(90deg,#e4d2a5,#fff4ca)}

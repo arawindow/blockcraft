@@ -12,6 +12,7 @@ app.get("/", (_,res)=>res.sendFile(path.join(__dirname,"index.html")));
 app.get("/index.html", (_,res)=>res.sendFile(path.join(__dirname,"index.html")));
 app.get("/client.js", (_,res)=>res.sendFile(path.join(__dirname,"client.js")));
 app.get("/style.css", (_,res)=>res.sendFile(path.join(__dirname,"style.css")));
+app.use("/assets", express.static(path.join(__dirname,"assets")));
 app.get("/health", (_,res)=>res.json({ok:true,players:io.engine.clientsCount}));
 
 const DATA_DIR = process.env.DATA_DIR || __dirname;

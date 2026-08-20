@@ -11,21 +11,84 @@ const blockGeo=new THREE.BoxGeometry(1,1,1);
 
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x87ceeb);scene.fog=new THREE.Fog(0x87ceeb,30,85);
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,250);
-const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;document.body.appendChild(renderer.domElement);
-const hemi=new THREE.HemisphereLight(0xffffff,0x445544,1.65),sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(20,30,10);sun.castShadow=true;scene.add(hemi,sun);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.08;
+document.body.appendChild(renderer.domElement);
+const hemi=new THREE.HemisphereLight(0xddeeff,0x34402f,1.15),sun=new THREE.DirectionalLight(0xfff1d6,3.0);
+sun.position.set(24,34,14);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-36;sun.shadow.camera.right=36;sun.shadow.camera.top=36;sun.shadow.camera.bottom=-36;
+sun.shadow.bias=-0.0006;
+scene.add(hemi,sun);
+const fillLight=new THREE.DirectionalLight(0x9cb8ff,.22);fillLight.position.set(-20,12,-20);scene.add(fillLight);
 
 const COLORS={grass:0x64a856,dirt:0x7a5739,stone:0x777777,cobble:0x666666,sand:0xd7c27c,wood:0x8a5a2b,leaves:0x3c8c43,plank:0xb98955,glass:0xbfe8ef,coal_ore:0x303030,iron_ore:0xb88f73,gold_ore:0xe5c04c,diamond_ore:0x5be1df,water:0x3f7fc9,lava:0xff5a17,farmland:0x5b381f,wheat:0xc8b84c,torch:0xffcc55,crafting_table:0x8c6a3c,furnace:0x555555,chest:0xa46a2b,rail:0x888888,powered_rail:0xc7a13b,wire:0x8a2525,lamp:0xffe894,portal:0x8c48d7,obsidian:0x252039,snow:0xf0f5ff,ice:0xa7d8ef,brick:0x9e5744};
 const SOLID=new Set(Object.keys(COLORS).filter(x=>!["water","lava","wheat","torch","wire","rail","powered_rail","portal"].includes(x)));
 
-function materialFor(t){
-  return new THREE.MeshStandardMaterial({color:COLORS[t]||0xffffff,transparent:["glass","water","ice","portal"].includes(t),opacity:t==="water"?.55:t==="glass"?.42:t==="portal"?.62:t==="ice"?.65:1,emissive:t==="lava"?0xaa2200:t==="torch"||t==="lamp"?0x664400:t==="portal"?0x331155:0,emissiveIntensity:t==="lava"?1.6:t==="torch"||t==="lamp"?1.1:t==="portal"?.8:0,roughness:.85});
+const textureLoader=new THREE.TextureLoader();
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
+const TEX={};
+function loadTex(name,color=true){
+  const tex=textureLoader.load(`/assets/textures/${name}.png`);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.magFilter=THREE.LinearFilter;
+  tex.minFilter=THREE.LinearMipmapLinearFilter;
+  tex.anisotropy=Math.min(8,maxAniso);
+  if(color) tex.colorSpace=THREE.SRGBColorSpace;
+  return tex;
 }
+function loadHeight(name){
+  const tex=textureLoader.load(`/assets/textures/${name}_height.png`);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.magFilter=THREE.LinearFilter;tex.minFilter=THREE.LinearMipmapLinearFilter;
+  return tex;
+}
+["grass_top","grass_side","dirt","stone","cobble","sand","wood_side","wood_top","leaves","plank","glass","coal_ore","iron_ore","gold_ore","diamond_ore","obsidian","snow","ice","brick","farmland","wheat","torch","crafting_table","furnace","chest","rail","powered_rail","wire","lamp","portal","water","lava"].forEach(n=>TEX[n]={map:loadTex(n),height:loadHeight(n)});
+
+const materialCache=new Map();
+function oneMaterial(t,face=t){
+  const ck=`${t}:${face}`;if(materialCache.has(ck))return materialCache.get(ck);
+  const tx=TEX[face]||TEX[t]||TEX.stone;
+  const transparent=["glass","water","ice","portal","leaves"].includes(t);
+  const mat=new THREE.MeshStandardMaterial({
+    map:tx.map,
+    bumpMap:tx.height,
+    bumpScale:t==="stone"||t.includes("ore")||t==="cobble"?.12:t==="wood"||t==="plank"?.09:.055,
+    roughness:t==="glass"?.18:t==="ice"?.28:t==="water"?.22:t==="metal"?.35:.82,
+    metalness:["rail","powered_rail"].includes(t)?.28:0,
+    transparent,
+    opacity:t==="water"?.72:t==="glass"?.34:t==="portal"?.7:t==="ice"?.66:t==="leaves"?.93:1,
+    alphaTest:t==="leaves"?.08:0,
+    side:t==="water"?THREE.DoubleSide:THREE.FrontSide,
+    emissive:t==="lava"?0xff3b0a:t==="torch"||t==="lamp"?0xffb52d:t==="portal"?0x6731a8:0x000000,
+    emissiveMap:["lava","torch","lamp","portal"].includes(t)?tx.map:null,
+    emissiveIntensity:t==="lava"?2.2:t==="torch"||t==="lamp"?1.55:t==="portal"?1.25:0
+  });
+  materialCache.set(ck,mat);return mat;
+}
+function materialsFor(t){
+  // BoxGeometry material order: +X,-X,+Y,-Y,+Z,-Z
+  if(t==="grass")return [oneMaterial(t,"grass_side"),oneMaterial(t,"grass_side"),oneMaterial(t,"grass_top"),oneMaterial(t,"dirt"),oneMaterial(t,"grass_side"),oneMaterial(t,"grass_side")];
+  if(t==="wood")return [oneMaterial(t,"wood_side"),oneMaterial(t,"wood_side"),oneMaterial(t,"wood_top"),oneMaterial(t,"wood_top"),oneMaterial(t,"wood_side"),oneMaterial(t,"wood_side")];
+  const m=oneMaterial(t,TEX[t]?t:"stone");return [m,m,m,m,m,m];
+}
+function materialFor(t){ return oneMaterial(t,TEX[t]?t:"plank"); }
+
 const key=(x,y,z)=>`${x},${y},${z}`;
 function makeBlock(k,t){
-  const [x,y,z]=k.split(",").map(Number);const m=new THREE.Mesh(blockGeo,materialFor(t));m.position.set(x,y,z);m.userData={x,y,z,type:t};m.castShadow=SOLID.has(t);m.receiveShadow=true;scene.add(m);blockMeshes.set(k,m);
+  const [x,y,z]=k.split(",").map(Number);
+  const m=new THREE.Mesh(blockGeo,materialsFor(t));
+  m.position.set(x,y,z);m.userData={x,y,z,type:t};
+  m.castShadow=SOLID.has(t)&&!["leaves","glass","ice"].includes(t);m.receiveShadow=true;
+  scene.add(m);blockMeshes.set(k,m);
 }
 function rebuildWorld(){
-  for(const m of blockMeshes.values()){scene.remove(m);m.material.dispose()}blockMeshes.clear();
+  for(const m of blockMeshes.values())scene.remove(m);blockMeshes.clear();
   for(const [k,t] of Object.entries(blocks)){
     const [x,y,z]=k.split(",").map(Number);
     const exposed=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([dx,dy,dz])=>!blocks[key(x+dx,y+dy,z+dz)] || !SOLID.has(blocks[key(x+dx,y+dy,z+dz)]));
@@ -228,9 +291,22 @@ function move(dt){
   socket.volatile.emit("move",{pos:[camera.position.x,camera.position.y,camera.position.z],yaw,pitch});
 }
 function updateSky(time,weather){
-  const a=time*Math.PI*2,day=Math.max(.08,Math.sin(a)*.85+.18),dayc=new THREE.Color(0x87ceeb),night=new THREE.Color(0x07111d);
-  scene.background.copy(night).lerp(dayc,day);scene.fog.color.copy(scene.background);sun.intensity=day*2;hemi.intensity=.35+day*1.3;sun.position.set(Math.cos(a)*35,Math.sin(a)*38,10);
-  if(dimension==="ember")scene.background.set(0x4a160c);if(dimension==="void")scene.background.set(0x080411);
+  const a=time*Math.PI*2, daylight=Math.max(.035,Math.sin(a)*.9+.14);
+  const dawn=new THREE.Color(0xe7a06d), dayc=new THREE.Color(0x7fb4d6), night=new THREE.Color(0x050a13);
+  const sky=night.clone().lerp(dayc,Math.min(1,daylight*1.18));
+  if(daylight>.12&&daylight<.42)sky.lerp(dawn,.20);
+  if(weather==="rain")sky.lerp(new THREE.Color(0x5f7180),.48);
+  if(weather==="storm")sky.lerp(new THREE.Color(0x303842),.68);
+  scene.background.copy(sky);scene.fog.color.copy(sky);
+  scene.fog.near=weather==="storm"?18:weather==="rain"?25:34;
+  scene.fog.far=weather==="storm"?58:weather==="rain"?70:92;
+  sun.intensity=daylight*3.0*(weather==="storm"?.42:weather==="rain"?.7:1);
+  hemi.intensity=.28+daylight*1.05;
+  sun.color.set(daylight<.4?0xffb77a:0xfff0d2);
+  sun.position.set(Math.cos(a)*42,Math.sin(a)*46,14);
+  renderer.toneMappingExposure=.82+daylight*.35;
+  if(dimension==="ember"){scene.background.set(0x39130d);scene.fog.color.set(0x39130d);sun.color.set(0xff6a32);sun.intensity=1.25}
+  if(dimension==="void"){scene.background.set(0x05020a);scene.fog.color.set(0x05020a);sun.color.set(0x7d65cc);sun.intensity=.5}
   $("#weatherLabel").textContent=weather.toUpperCase();
 }
 let audioCtx=null;

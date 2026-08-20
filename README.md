@@ -73,3 +73,9 @@ Persistent state is stored at `/data/world.json`.
 
 This is an original browser voxel game. It does not use Minecraft textures, sounds, code, maps, UI assets, or other copyrighted game assets. The implemented systems are compact browser-game equivalents, not a claim of feature-for-feature parity with the commercial Minecraft codebase.
 
+
+## Semi-realistic graphics pack
+
+This build includes original 96×96 textured voxel materials in `assets/textures/`, per-face grass/log materials, bump mapping, anisotropic filtering, ACES filmic tone mapping, soft 2048px shadows, atmospheric fog, weather-dependent lighting, transparent water/glass/ice, and emissive lava/portal/light materials.
+
+All included textures are original generated assets for Blockcraft and do not use Minecraft texture files.
