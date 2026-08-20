@@ -1,16 +1,14 @@
 {
-  "name": "blockcraft-multiplayer",
-  "version": "1.0.0",
+  "name": "blockcraft-survival",
+  "version": "2.0.0",
   "private": true,
-  "description": "Persistent multiplayer voxel sandbox for Railway",
+  "description": "Persistent multiplayer voxel survival sandbox",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
+  "engines": { "node": ">=18" },
   "dependencies": {
     "express": "^5.1.0",
     "socket.io": "^4.8.1"

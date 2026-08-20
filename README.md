@@ -1,117 +1,68 @@
-# Blockcraft Multiplayer
+# Blockcraft Survival v2
 
-This version is structured to match a GitHub repository where every project file is in the repository root.
+This is a major foundation update for the persistent Railway/GitHub multiplayer game.
 
-## Exact repository structure
+## Repository files
 
 ```text
-your-repository/
-├── .gitignore
-├── package.json
-├── railway.json
-├── README.md
-├── server.js
-└── index.html
+.gitignore
+package.json
+railway.json
+README.md
+server.js
+index.html
+style.css
+client.js
 ```
 
-There is **no `public` folder** in this version.
+## Included in this build
 
-## What it includes
-
-- Multiplayer Socket.IO server
-- Shared persistent voxel world
-- Username login screen
-- Other players visible in the world
-- Multiplayer mining and block placement
-- Translucent multiplayer chat panel
-- Chat text above player heads
-- Player join/leave notifications
-- Persistent block changes
-- Persistent player position and inventory
-- Health and hunger
+- Persistent multiplayer world and player state
+- Username login
+- Translucent multiplayer chat
+- Speech bubbles above players
+- Improved player models
+- Procedural original pixel-style block textures
+- Plains, forest, desert and snow terrain
+- Basic caves
+- Coal and iron ore generation
+- Trees
+- 9-slot hotbar
+- Inventory screen
+- Recipe crafting
+- Wooden, stone and iron pickaxes
+- Axes and swords as inventory/tool items
+- Tool durability
+- Tool-aware mining speeds
+- Mining progress bar
+- Cobblestone drops from stone
+- Coal and iron progression
+- Crafting tables, furnaces, chests, torches and glass as placeable blocks
+- Health, hunger, sprinting, jumping and fall damage
 - Day/night cycle
-- Collision fixes
+- Persistent block placement and mining
+- Railway volume-compatible saves
 
-## GitHub
+## Railway persistence
 
-Replace the files in the root of your GitHub repository with the files from this package.
-
-If GitHub currently displays `server` instead of `server.js` and `index` instead of `index.html`, that is normally just Windows Explorer hiding known file extensions. Do not rename them to add a second extension.
-
-The actual filenames must be:
-
-- `server.js`
-- `index.html`
-
-## Railway deployment
-
-Create/connect a Railway service from the GitHub repository.
-
-Railway runs:
-
-```bash
-npm start
-```
-
-which executes:
-
-```bash
-node server.js
-```
-
-### Permanent world storage
-
-Add a Railway Volume and mount it at:
+Keep your Railway Volume mounted at:
 
 ```text
 /data
 ```
 
-Then add the Railway environment variable:
+and keep the variable:
 
 ```text
 DATA_DIR=/data
 ```
 
-The multiplayer server will store the permanent world at:
+The server writes `/data/world.json`.
 
-```text
-/data/world.json
-```
+## Deployment
 
-Without a Railway Volume, the game can still run but server filesystem data may disappear after redeployments or container replacement.
+Upload/replace these files in GitHub. Railway should automatically redeploy.
 
-## Opening the game
+## Important scope note
 
-After Railway deploys successfully:
-
-1. Open the public Railway domain.
-2. Enter a username.
-3. Join the world.
-4. Send the same Railway URL to your friends.
-5. Everyone using that deployment joins the same server world.
-
-## Useful health check
-
-The server exposes:
-
-```text
-/health
-```
-
-It returns a small JSON response showing whether the server is alive and how many Socket.IO clients are connected.
-
-## Local testing
-
-Install Node.js, then from the repository directory run:
-
-```bash
-npm install
-npm start
-```
-
-Open:
-
-```text
-http://localhost:3000
-```
+This is a foundation for a Minecraft-class voxel survival game, not literal feature parity with Minecraft. Large systems still to build include authoritative item drops, full chest UI/storage synchronization, timed furnace processing, agriculture, fluid simulation, lighting propagation, weather, hostile/passive mob AI, armor, ranged combat, enchantment-like progression, generated structures, villages/NPCs, portals/dimensions, automation circuitry, advanced world streaming/chunks, sound/music, achievements, and bosses.
