@@ -1,161 +1,475 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const fs = require('fs');
-const path = require('path');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const fs = require("fs");
+const path = require("path");
 
-const PORT = process.env.PORT || 3000;
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-const WORLD_FILE = path.join(DATA_DIR, 'world.json');
-const WORLD_RADIUS = 42;
-const MIN_Y = -8;
-const MAX_Y = 24;
-const VALID_BLOCKS = new Set([
-  'grass','dirt','stone','sand','wood','leaves','plank','cobble','coal_ore','iron_ore',
-  'snow','glass','crafting_table','furnace','chest','torch'
-]);
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 6e6, cors: { origin: true, credentials: true } });
-for (const file of ['index.html','style.css','client.js']) {
-  app.get('/' + (file === 'index.html' ? '' : file), (_req,res) => res.sendFile(path.join(__dirname,file)));
-}
-app.get('/index.html', (_req,res) => res.sendFile(path.join(__dirname,'index.html')));
-app.get('/health', (_req,res) => res.json({ok:true,players:io.engine.clientsCount,blocks:blocks?.size||0}));
+const io = new Server(server, { maxHttpBufferSize: 2e6 });
 
-function key(x,y,z){ return `${x},${y},${z}`; }
-function hash2(x,z,s=0){
-  let n=Math.imul(x+s*1013,374761393)+Math.imul(z-s*977,668265263);
-  n=(n^(n>>>13)); n=Math.imul(n,1274126177); return ((n^(n>>>16))>>>0)/4294967296;
+app.get("/", (_,res)=>res.sendFile(path.join(__dirname,"index.html")));
+app.get("/index.html", (_,res)=>res.sendFile(path.join(__dirname,"index.html")));
+app.get("/client.js", (_,res)=>res.sendFile(path.join(__dirname,"client.js")));
+app.get("/style.css", (_,res)=>res.sendFile(path.join(__dirname,"style.css")));
+app.get("/health", (_,res)=>res.json({ok:true,players:io.engine.clientsCount}));
+
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const SAVE = path.join(DATA_DIR,"world.json");
+fs.mkdirSync(DATA_DIR,{recursive:true});
+
+const TYPES = ["grass","dirt","stone","cobble","sand","wood","leaves","plank","glass","coal_ore","iron_ore","gold_ore","diamond_ore","water","lava","farmland","wheat","torch","crafting_table","furnace","chest","rail","powered_rail","wire","lamp","portal","obsidian","snow","ice","brick"];
+const DIMENSIONS = ["overworld","ember","void"];
+const k=(x,y,z)=>`${x},${y},${z}`;
+
+function noise(x,z,s=0){
+  return Math.sin((x+s)*.16)*2 + Math.cos((z-s)*.13)*1.7 + Math.sin((x+z+s)*.07)*1.2;
 }
-function hash3(x,y,z,s=0){ return hash2(x + Math.imul(y,31), z + Math.imul(y,17), s); }
-function biomeAt(x,z){
-  const v=Math.sin(x*.055)+Math.cos(z*.047)+Math.sin((x-z)*.026);
-  if(v<-1.15) return 'desert';
-  if(v>1.35) return 'snow';
-  if(hash2(Math.floor(x/7),Math.floor(z/7),72)>.62) return 'forest';
-  return 'plains';
+function defaultPlayer(name){
+  return {
+    name, dimension:"overworld", pos:[0,8,0], yaw:0,pitch:0,
+    health:20,hunger:20,armor:0,xp:0,level:0,
+    inventory:{grass:20,dirt:20,cobble:10,wood:6,apple:3,torch:4},
+    hotbar:["grass","dirt","cobble","wood","torch","wood_pickaxe","wood_sword","bow","apple"],
+    equipment:{head:null,chest:null,legs:null,feet:null},
+    effects:[], achievements:[], spawn:{dimension:"overworld",pos:[0,8,0]}
+  };
 }
-function heightAt(x,z){
-  const broad=Math.sin(x*.075)*2.2+Math.cos(z*.066)*2.0+Math.sin((x+z)*.035)*1.5;
-  const detail=Math.sin(x*.29)*.65+Math.cos(z*.27)*.55;
-  return Math.floor(3+broad+detail);
+
+function newState(){
+  return {
+    version:3, seed:Math.floor(Math.random()*999999),
+    dimensions:{overworld:{blocks:{},time:.22,weather:"clear"},ember:{blocks:{},time:.65,weather:"ash"},void:{blocks:{},time:.82,weather:"clear"}},
+    players:{}, containers:{}, furnaces:{}, crops:{}, entities:{}, structuresGenerated:{}, boss:{},
+    automation:{}, achievementsGlobal:[]
+  };
 }
-function generateWorld(){
-  const map=new Map();
-  const set=(x,y,z,t)=>{ if(y>=MIN_Y&&y<=MAX_Y&&!map.has(key(x,y,z))) map.set(key(x,y,z),t); };
-  for(let x=-WORLD_RADIUS;x<=WORLD_RADIUS;x++){
-    for(let z=-WORLD_RADIUS;z<=WORLD_RADIUS;z++){
-      const biome=biomeAt(x,z), h=heightAt(x,z);
-      for(let y=MIN_Y;y<=h;y++){
-        // Sparse cave pockets below the upper soil layer.
-        const cave=y<h-3 && y>-7 && hash3(Math.floor(x/2),Math.floor(y/2),Math.floor(z/2),54)>.92;
-        if(cave) continue;
-        let type='stone';
-        if(y===h) type=biome==='desert'?'sand':biome==='snow'?'snow':'grass';
-        else if(y>=h-2) type=biome==='desert'?'sand':'dirt';
-        else {
-          const ore=hash3(x,y,z,91);
-          if(y<1&&ore>.975) type='iron_ore';
-          else if(y<4&&ore>.94) type='coal_ore';
+let state = newState();
+try{ if(fs.existsSync(SAVE)) state = JSON.parse(fs.readFileSync(SAVE,"utf8")); }catch(e){ console.error("save load",e); }
+
+function setBlock(dim,x,y,z,type){
+  const b=state.dimensions[dim].blocks;
+  const key=k(x,y,z);
+  if(type==null) delete b[key]; else b[key]=type;
+}
+function getBlock(dim,x,y,z){ return state.dimensions[dim].blocks[k(x,y,z)] || null; }
+
+function generateDimension(dim){
+  const d=state.dimensions[dim];
+  if(Object.keys(d.blocks).length) return;
+  const R=34;
+  if(dim==="overworld"){
+    for(let x=-R;x<=R;x++) for(let z=-R;z<=R;z++){
+      let h=Math.floor(3+noise(x,z,state.seed%100));
+      for(let y=-4;y<=h;y++){
+        let t=y===h?(h<=1?"sand":h>=6?"snow":"grass"):y>=h-2?"dirt":"stone";
+        if(y<-1 && Math.sin(x*.6+y*.8+z*.5)>1.65) continue;
+        if(y<h-3){
+          const r=Math.abs(Math.sin(x*12.9898+z*78.233+y*37.719));
+          if(r>.985)t="diamond_ore"; else if(r>.955)t="gold_ore"; else if(r>.90)t="iron_ore"; else if(r>.83)t="coal_ore";
         }
-        set(x,y,z,type);
+        setBlock(dim,x,y,z,t);
       }
-      const treeChance=biome==='forest'?.075:biome==='plains'?.022:biome==='snow'?.018:0;
-      if(hash2(x,z,9)<treeChance && h>1 && Math.abs(x)>4 && Math.abs(z)>4){
-        const trunk=3+(hash2(x,z,11)>.55?1:0);
-        for(let y=h+1;y<=h+trunk;y++) set(x,y,z,'wood');
-        for(let dx=-2;dx<=2;dx++) for(let dz=-2;dz<=2;dz++) for(let dy=trunk-1;dy<=trunk+1;dy++){
-          if(Math.abs(dx)+Math.abs(dz)<4 && !(dx===0&&dz===0&&dy<=trunk)) set(x+dx,h+dy,z+dz,'leaves');
+      if(Math.random()<.018 && h>2 && Math.abs(x)>4 && Math.abs(z)>4){
+        for(let y=1;y<=4;y++) setBlock(dim,x,h+y,z,"wood");
+        for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=3;dy<=5;dy++) if(Math.abs(dx)+Math.abs(dz)<4)setBlock(dim,x+dx,h+dy,z+dz,"leaves");
+      }
+    }
+  } else if(dim==="ember"){
+    for(let x=-R;x<=R;x++)for(let z=-R;z<=R;z++){
+      const h=Math.floor(1+noise(x,z,55)*.6);
+      for(let y=-4;y<=h;y++) setBlock(dim,x,y,z, y===h?"brick":"stone");
+      if(Math.random()<.03) setBlock(dim,x,h+1,z,"lava");
+    }
+  } else {
+    for(let x=-R;x<=R;x++)for(let z=-R;z<=R;z++){
+      if(Math.hypot(x,z)<20 && noise(x,z,99)>-.3){
+        let h=Math.floor(noise(x,z,99)*.25);
+        for(let y=-2;y<=h;y++) setBlock(dim,x,y,z,y===h?"obsidian":"stone");
+      }
+    }
+  }
+}
+DIMENSIONS.forEach(generateDimension);
+
+function generateStructures(){
+  if(state.structuresGenerated.overworld) return;
+  const dim="overworld";
+  const villages=[[-18,-12],[17,15]];
+  for(const [cx,cz] of villages){
+    for(let h=0;h<3;h++){
+      const bx=cx+h*7, bz=cz+(h%2)*6;
+      let gy=0; for(let y=20;y>-10;y--) if(getBlock(dim,bx,y,bz)){gy=y+1;break;}
+      for(let x=bx-2;x<=bx+2;x++)for(let z=bz-2;z<=bz+2;z++){
+        setBlock(dim,x,gy-1,z,"plank");
+        if(x===bx-2||x===bx+2||z===bz-2||z===bz+2){
+          for(let y=gy;y<=gy+2;y++)setBlock(dim,x,y,z,"wood");
+        }
+      }
+      for(let x=bx-3;x<=bx+3;x++)for(let z=bz-3;z<=bz+3;z++)setBlock(dim,x,gy+3,z,"plank");
+      setBlock(dim,bx,gy,bz-2,null);
+      entity("villager",{dimension:dim,pos:[bx,gy+1,bz],health:20,profession:["farmer","smith","fisher"][h%3],ai:"village"});
+    }
+    // central lamp/well
+    let gy=0;for(let y=20;y>-10;y--)if(getBlock(dim,cx,y,cz)){gy=y+1;break;}
+    setBlock(dim,cx,gy-1,cz,"stone");setBlock(dim,cx,gy,cz,"water");
+    setBlock(dim,cx+2,gy,cz,"torch");
+  }
+  state.structuresGenerated.overworld=true;
+}
+
+generateStructures();
+
+function addItem(p,type,count=1){
+  p.inventory[type]=(p.inventory[type]||0)+count;
+}
+function takeItem(p,type,count=1){
+  if((p.inventory[type]||0)<count) return false;
+  p.inventory[type]-=count;
+  if(p.inventory[type]<=0) delete p.inventory[type];
+  return true;
+}
+function entity(type,data={}){
+  const id="e"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  state.entities[id]={id,type,...data};
+  return state.entities[id];
+}
+function save(){ try{ fs.writeFileSync(SAVE,JSON.stringify(state)); }catch(e){ console.error("save",e); } }
+setInterval(save,5000);
+process.on("SIGTERM",()=>{save();process.exit(0)});
+process.on("SIGINT",()=>{save();process.exit(0)});
+
+const online = new Map();
+
+function publicPlayer(p,id){ return {id,name:p.name,dimension:p.dimension,pos:p.pos,yaw:p.yaw,pitch:p.pitch,equipment:p.equipment,health:p.health}; }
+
+io.on("connection", socket=>{
+  socket.on("join", ({username})=>{
+    username=String(username||"").trim().replace(/[^\w\-]/g,"").slice(0,16);
+    if(username.length<2) return socket.emit("joinError","Use at least 2 letters/numbers.");
+    if([...online.values()].includes(username)) return socket.emit("joinError","That username is already online.");
+    if(!state.players[username]) state.players[username]=defaultPlayer(username);
+    const p=state.players[username]; online.set(socket.id,username);
+    socket.join(p.dimension);
+    socket.emit("init", {self:p, dimensions:state.dimensions, entities:state.entities, containers:state.containers, furnaces:state.furnaces, crops:state.crops, automation:state.automation,
+      players:[...online.entries()].filter(([id])=>id!==socket.id).map(([id,n])=>publicPlayer(state.players[n],id))});
+    socket.to(p.dimension).emit("playerJoin",publicPlayer(p,socket.id));
+    io.to(p.dimension).emit("systemChat",`${username} joined the world`);
+  });
+
+  socket.on("move", d=>{
+    const n=online.get(socket.id); if(!n)return; const p=state.players[n];
+    if(!Array.isArray(d.pos)||d.pos.some(v=>!Number.isFinite(v)))return;
+    p.pos=d.pos.map(v=>Math.max(-200,Math.min(200,v))); p.yaw=+d.yaw||0;p.pitch=+d.pitch||0;
+    socket.to(p.dimension).volatile.emit("playerMove",{id:socket.id,pos:p.pos,yaw:p.yaw,pitch:p.pitch});
+  });
+
+  socket.on("chat", text=>{
+    const n=online.get(socket.id);if(!n)return; text=String(text||"").trim().slice(0,120);if(!text)return;
+    const p=state.players[n]; io.to(p.dimension).emit("chat",{id:socket.id,name:n,text});
+  });
+
+  socket.on("block", d=>{
+    const n=online.get(socket.id);if(!n)return; const p=state.players[n];
+    const {x,y,z}=d; if(![x,y,z].every(Number.isInteger)||Math.abs(x)>100||Math.abs(z)>100||y<-20||y>40)return;
+    if(d.action==="break"){
+      const t=getBlock(p.dimension,x,y,z); if(!t)return;
+      setBlock(p.dimension,x,y,z,null);
+      if(!["water","lava","portal"].includes(t)) entity("drop",{dimension:p.dimension,pos:[x,y+.2,z],item:t,count:1,age:0});
+      io.to(p.dimension).emit("blockUpdate",{x,y,z,type:null});
+      io.to(p.dimension).emit("entitySync",state.entities);
+    }else if(d.action==="place" && TYPES.includes(d.type)){
+      if(getBlock(p.dimension,x,y,z))return;
+      if(!takeItem(p,d.type,1))return;
+      setBlock(p.dimension,x,y,z,d.type);
+      io.to(p.dimension).emit("blockUpdate",{x,y,z,type:d.type});
+      socket.emit("playerState",p);
+    }
+  });
+
+  socket.on("dropItem", ({item,count=1})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    count=Math.max(1,Math.min(64,Math.floor(count)));
+    if(!takeItem(p,item,count))return;
+    entity("drop",{dimension:p.dimension,pos:[p.pos[0],p.pos[1],p.pos[2]],item,count,age:0});
+    io.to(p.dimension).emit("entitySync",state.entities);socket.emit("playerState",p);
+  });
+
+  socket.on("pickup", ({id})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n],e=state.entities[id];
+    if(!e||e.type!=="drop"||e.dimension!==p.dimension)return;
+    const dx=e.pos[0]-p.pos[0],dy=e.pos[1]-p.pos[1],dz=e.pos[2]-p.pos[2];
+    if(dx*dx+dy*dy+dz*dz>9)return;
+    addItem(p,e.item,e.count);delete state.entities[id];
+    socket.emit("playerState",p);io.to(p.dimension).emit("entitySync",state.entities);
+  });
+
+  socket.on("craft", ({recipe})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    const recipes={
+      plank:{need:{wood:1},give:{plank:4}},
+      crafting_table:{need:{plank:4},give:{crafting_table:1}},
+      chest:{need:{plank:8},give:{chest:1}},
+      furnace:{need:{cobble:8},give:{furnace:1}},
+      torch:{need:{coal_ore:1,wood:1},give:{torch:4}},
+      wood_pickaxe:{need:{plank:3,wood:2},give:{wood_pickaxe:1}},
+      stone_pickaxe:{need:{cobble:3,wood:2},give:{stone_pickaxe:1}},
+      iron_pickaxe:{need:{iron_ingot:3,wood:2},give:{iron_pickaxe:1}},
+      wood_sword:{need:{plank:2,wood:1},give:{wood_sword:1}},
+      bow:{need:{wood:3,string:3},give:{bow:1}},
+      arrow:{need:{stone:1,wood:1},give:{arrow:4}},
+      rail:{need:{iron_ingot:2,wood:1},give:{rail:8}},
+      powered_rail:{need:{gold_ingot:2,wire:1},give:{powered_rail:4}},
+      wire:{need:{iron_ingot:1,coal_ore:1},give:{wire:4}},
+      lamp:{need:{glass:1,wire:1,torch:1},give:{lamp:1}},
+      obsidian:{need:{stone:4,coal_ore:2},give:{obsidian:1}},
+      portal:{need:{obsidian:8,diamond:1},give:{portal:1}},
+      boat:{need:{plank:5},give:{boat:1}},
+      minecart:{need:{iron_ingot:5},give:{minecart:1}},
+      fishing_rod:{need:{wood:3,string:2},give:{fishing_rod:1}},
+      leather_helmet:{need:{leather:5},give:{leather_helmet:1}},
+      leather_chest:{need:{leather:8},give:{leather_chest:1}},
+      healing_potion:{need:{apple:1,glass:1},give:{healing_potion:1}}
+    };
+    const r=recipes[recipe]; if(!r)return;
+    for(const [i,c] of Object.entries(r.need)) if((p.inventory[i]||0)<c)return;
+    for(const [i,c] of Object.entries(r.need)) takeItem(p,i,c);
+    for(const [i,c] of Object.entries(r.give)) addItem(p,i,c);
+    socket.emit("playerState",p);
+  });
+
+  socket.on("openContainer", ({x,y,z})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n],id=`${p.dimension}:${k(x,y,z)}`;
+    if(getBlock(p.dimension,x,y,z)==="chest"){
+      if(!state.containers[id])state.containers[id]={slots:{}};
+      socket.emit("containerData",{kind:"chest",id,data:state.containers[id]});
+    }else if(getBlock(p.dimension,x,y,z)==="furnace"){
+      if(!state.furnaces[id])state.furnaces[id]={input:null,inputCount:0,fuel:0,output:null,outputCount:0,progress:0};
+      socket.emit("containerData",{kind:"furnace",id,data:state.furnaces[id]});
+    }
+  });
+
+  socket.on("containerTransfer", d=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(d.kind==="chest"){
+      const c=state.containers[d.id];if(!c)return;
+      if(d.dir==="in" && takeItem(p,d.item,1)) c.slots[d.item]=(c.slots[d.item]||0)+1;
+      if(d.dir==="out" && (c.slots[d.item]||0)>0){c.slots[d.item]--;addItem(p,d.item,1);if(c.slots[d.item]<=0)delete c.slots[d.item];}
+      socket.emit("containerData",{kind:"chest",id:d.id,data:c});socket.emit("playerState",p);
+    } else if(d.kind==="furnace"){
+      const f=state.furnaces[d.id];if(!f)return;
+      if(d.dir==="input" && takeItem(p,d.item,1)){if(!f.input||f.input===d.item){f.input=d.item;f.inputCount++;}else addItem(p,d.item,1);}
+      if(d.dir==="fuel" && takeItem(p,d.item,1)){f.fuel+=d.item==="coal_ore"?12:4;}
+      if(d.dir==="output" && f.outputCount>0){addItem(p,f.output,f.outputCount);f.outputCount=0;f.output=null;}
+      socket.emit("containerData",{kind:"furnace",id:d.id,data:f});socket.emit("playerState",p);
+    }
+  });
+
+  socket.on("plant", ({x,y,z})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(getBlock(p.dimension,x,y,z)!=="farmland"||getBlock(p.dimension,x,y+1,z))return;
+    if(!takeItem(p,"seed",1))return;
+    setBlock(p.dimension,x,y+1,z,"wheat");state.crops[`${p.dimension}:${k(x,y+1,z)}`]={stage:0};
+    io.to(p.dimension).emit("blockUpdate",{x,y:y+1,z,type:"wheat"});socket.emit("playerState",p);
+  });
+
+  socket.on("usePortal", ({target})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!DIMENSIONS.includes(target))return;
+    socket.leave(p.dimension);p.dimension=target;p.pos=[0,8,0];socket.join(target);
+    socket.emit("dimensionChange",{dimension:target,blocks:state.dimensions[target].blocks,entities:state.entities});
+    socket.to(target).emit("playerJoin",publicPlayer(p,socket.id));
+  });
+
+  socket.on("equip", ({slot,item})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!["head","chest","legs","feet"].includes(slot)||!item)return;
+    if(!takeItem(p,item,1))return;
+    if(p.equipment[slot])addItem(p,p.equipment[slot],1);
+    p.equipment[slot]=item;
+    p.armor=Object.values(p.equipment).filter(Boolean).length*2;
+    socket.emit("playerState",p);
+  });
+
+  socket.on("consume", ({item})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!takeItem(p,item,1))return;
+    if(item==="apple")p.hunger=Math.min(20,p.hunger+4);
+    if(item==="healing_potion"){p.health=Math.min(20,p.health+8);p.effects.push({type:"regen",until:Date.now()+10000});}
+    socket.emit("playerState",p);
+  });
+
+  socket.on("attack", ({entityId,damage=2})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n],e=state.entities[entityId];if(!e)return;
+    const dx=e.pos[0]-p.pos[0],dy=e.pos[1]-p.pos[1],dz=e.pos[2]-p.pos[2];if(dx*dx+dy*dy+dz*dz>36)return;
+    e.health=(e.health||10)-Math.max(1,Math.min(10,damage));
+    if(e.health<=0){
+      if(e.type==="cow"){entity("drop",{dimension:e.dimension,pos:e.pos,item:"leather",count:1,age:0});entity("drop",{dimension:e.dimension,pos:e.pos,item:"meat",count:2,age:0});}
+      if(e.type==="sheep")entity("drop",{dimension:e.dimension,pos:e.pos,item:"wool",count:2,age:0});
+      if(e.type==="hostile")entity("drop",{dimension:e.dimension,pos:e.pos,item:"string",count:1,age:0});
+      if(e.type==="boss"){entity("drop",{dimension:e.dimension,pos:e.pos,item:"boss_core",count:1,age:0});p.achievements.push("boss_slayer");}
+      delete state.entities[entityId]; p.xp+=5; while(p.xp >= (p.level+1)*10){p.xp-=(p.level+1)*10;p.level++;}
+    }
+    io.to(p.dimension).emit("entitySync",state.entities);socket.emit("playerState",p);
+  });
+
+  socket.on("shoot", ({dir})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!takeItem(p,"arrow",1))return;
+    entity("projectile",{dimension:p.dimension,pos:[...p.pos],vel:dir.map(v=>v*12),owner:n,age:0});
+    io.to(p.dimension).emit("entitySync",state.entities);socket.emit("playerState",p);
+  });
+
+  socket.on("spawnVehicle", ({type})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!["boat","minecart"].includes(type)||!takeItem(p,type,1))return;
+    entity(type,{dimension:p.dimension,pos:[...p.pos],health:10});
+    io.to(p.dimension).emit("entitySync",state.entities);socket.emit("playerState",p);
+  });
+
+
+  socket.on("enchant", ({item})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if((p.inventory[item]||0)<1 || p.level<1)return;
+    p.level--; p.inventory[item]--; const enchanted=`enchanted_${item}`;addItem(p,enchanted,1);
+    socket.emit("playerState",p);
+  });
+
+  socket.on("vehicleMove", ({id,pos})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n],e=state.entities[id];
+    if(!e||!["boat","minecart"].includes(e.type)||e.dimension!==p.dimension||!Array.isArray(pos)||pos.length!==3)return;
+    const dx=e.pos[0]-p.pos[0],dz=e.pos[2]-p.pos[2];if(dx*dx+dz*dz>36)return;
+    e.pos=pos.map(v=>Math.max(-200,Math.min(200,+v||0)));
+  });
+
+  socket.on("achievement", ({id})=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    if(!p.achievements.includes(id)){p.achievements.push(id);socket.emit("achievementUnlocked",id);}
+  });
+
+  socket.on("disconnect", ()=>{
+    const n=online.get(socket.id);if(!n)return;const p=state.players[n];
+    online.delete(socket.id);io.to(p.dimension).emit("playerLeave",{id:socket.id});io.to(p.dimension).emit("systemChat",`${n} left the world`);
+  });
+});
+
+function sim(){
+  const now=Date.now();
+  for(const dim of DIMENSIONS){
+    const d=state.dimensions[dim];
+    d.time=(d.time+.00035)%1;
+    if(dim==="overworld" && Math.random()<.0015)d.weather=Math.random()<.65?"rain":Math.random()<.5?"storm":"clear";
+    if(dim==="overworld" && Math.random()<.006)d.weather="clear";
+  }
+
+  // crops
+  for(const [id,c] of Object.entries(state.crops)){
+    if(Math.random()<.04)c.stage=Math.min(7,c.stage+1);
+  }
+
+  // furnaces
+  for(const f of Object.values(state.furnaces)){
+    const smelt={iron_ore:"iron_ingot",gold_ore:"gold_ingot",sand:"glass",meat:"cooked_meat"};
+    if(f.input && f.fuel>0 && smelt[f.input]){
+      f.progress+=1; f.fuel-=.08;
+      if(f.progress>=100){f.output=smelt[f.input];f.outputCount++;f.inputCount--;if(f.inputCount<=0){f.input=null;f.inputCount=0}f.progress=0;}
+    }
+  }
+
+  // spawn animals/hostiles/boss
+  for(const dim of DIMENSIONS){
+    const players=[...online.values()].map(n=>state.players[n]).filter(p=>p.dimension===dim);
+    if(!players.length)continue;
+    const count=Object.values(state.entities).filter(e=>e.dimension===dim).length;
+    if(count<32 && Math.random()<.08){
+      const p=players[Math.floor(Math.random()*players.length)], a=Math.random()*Math.PI*2,r=10+Math.random()*14;
+      const type = dim==="overworld" ? (state.dimensions[dim].time>.55 && state.dimensions[dim].time<.95 ? "hostile" : Math.random()<.5?"cow":"sheep") : "hostile";
+      entity(type,{dimension:dim,pos:[p.pos[0]+Math.cos(a)*r,5,p.pos[2]+Math.sin(a)*r],health:type==="hostile"?12:10,ai:"wander"});
+    }
+    if(dim==="void" && !Object.values(state.entities).some(e=>e.type==="boss"&&e.dimension==="void")){
+      entity("boss",{dimension:"void",pos:[0,8,-18],health:180,ai:"boss"});
+    }
+  }
+
+  // entities
+  for(const e of Object.values(state.entities)){
+    e.age=(e.age||0)+.1;
+    if(e.type==="drop"){
+      e.pos[1]=Math.max(1,e.pos[1]-.04);
+      if(e.age>900) delete state.entities[e.id];
+    }
+    if(e.type==="projectile"){
+      e.pos[0]+=e.vel[0]*.1;e.pos[1]+=e.vel[1]*.1;e.pos[2]+=e.vel[2]*.1;e.vel[1]-=.5;
+      for(const other of Object.values(state.entities)){
+        if(other===e||!other.health||other.dimension!==e.dimension)continue;
+        const dx=other.pos[0]-e.pos[0],dy=other.pos[1]-e.pos[1],dz=other.pos[2]-e.pos[2];
+        if(dx*dx+dy*dy+dz*dz<1.2){other.health-=5;delete state.entities[e.id];if(other.health<=0)delete state.entities[other.id];break;}
+      }
+      if(e.age>8)delete state.entities[e.id];
+    }
+    if(["cow","sheep","hostile","boss","villager"].includes(e.type)){
+      const candidates=[...online.values()].map(n=>state.players[n]).filter(p=>p.dimension===e.dimension);
+      if(!candidates.length)continue;
+      let target=candidates[0],best=1e9;
+      for(const p of candidates){const dx=p.pos[0]-e.pos[0],dz=p.pos[2]-e.pos[2],d=dx*dx+dz*dz;if(d<best){best=d;target=p}}
+      if(e.type==="villager"){
+        e.pos[0]+=Math.sin(now/1800+e.pos[2])*.01;e.pos[2]+=Math.cos(now/1700+e.pos[0])*.01;
+      } else if(e.type==="hostile"||e.type==="boss"){
+        const d=Math.sqrt(best)||1,s=e.type==="boss"?.12:.07;e.pos[0]+=(target.pos[0]-e.pos[0])/d*s;e.pos[2]+=(target.pos[2]-e.pos[2])/d*s;
+        if(d<1.5){target.health=Math.max(0,target.health-(e.type==="boss"?.5:.18));}
+      }else{
+        e.pos[0]+=Math.sin(now/1000+e.pos[2])*.015;e.pos[2]+=Math.cos(now/1300+e.pos[0])*.015;
+      }
+    }
+  }
+
+  // players passive sim
+  for(const n of online.values()){
+    const p=state.players[n];
+    p.hunger=Math.max(0,p.hunger-.002);
+    if(p.hunger<=0)p.health=Math.max(0,p.health-.02);
+    if(p.health<=0){p.health=20;p.hunger=20;p.dimension=p.spawn.dimension;p.pos=[...p.spawn.pos];}
+  }
+
+
+  // compact fluid simulation: exposed water/lava slowly spreads horizontally/downward.
+  if(Math.random()<.35){
+    for(const dim of DIMENSIONS){
+      const b=state.dimensions[dim].blocks;
+      let processed=0;
+      for(const [kk,type] of Object.entries(b)){
+        if(processed++>120)break;
+        if(type!=="water"&&type!=="lava")continue;
+        const [x,y,z]=kk.split(",").map(Number);
+        const candidates=[[0,-1,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+        for(const [dx,dy,dz] of candidates){
+          if(Math.random()>.08)continue;
+          const nx=x+dx,ny=y+dy,nz=z+dz;
+          if(!getBlock(dim,nx,ny,nz)){
+            setBlock(dim,nx,ny,nz,type);
+            io.to(dim).emit("blockUpdate",{x:nx,y:ny,z:nz,type});
+            break;
+          }
         }
       }
     }
   }
-  return map;
-}
 
-let blocks, players={}, containers={}, gameTime=.20, chatHistory=[];
-function defaultPlayer(){ return {
-  pos:[0,heightAt(0,0)+2.7,0], yaw:0, health:20, hunger:20, selectedSlot:0,
-  inventory:{dirt:16,cobble:0,wood:0,plank:0,stone:0,sand:0,coal:0,iron_ore:0,iron_ingot:0,apple:3,
-    wooden_pickaxe:1,wooden_axe:0,wooden_sword:0,stone_pickaxe:0,stone_axe:0,stone_sword:0,iron_pickaxe:0,
-    crafting_table:0,furnace:0,chest:0,torch:0,glass:0},
-  durability:{wooden_pickaxe:60,wooden_axe:60,wooden_sword:60,stone_pickaxe:132,stone_axe:132,stone_sword:132,iron_pickaxe:251},
-  updatedAt:Date.now()
-};}
-function loadWorld(){
-  try{
-    if(fs.existsSync(WORLD_FILE)){
-      const d=JSON.parse(fs.readFileSync(WORLD_FILE,'utf8'));
-      blocks=new Map(d.blocks||[]); players=d.players||{}; containers=d.containers||{};
-      gameTime=Number.isFinite(d.gameTime)?d.gameTime:.20;
-      console.log(`Loaded world: ${blocks.size} blocks`); return;
+  // automation: wire powers adjacent lamps/powered rail if adjacent torch
+  for(const dim of DIMENSIONS){
+    const b=state.dimensions[dim].blocks;
+    for(const [key,type] of Object.entries(b)){
+      if(type!=="wire")continue;
+      const [x,y,z]=key.split(",").map(Number);
+      const powered=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([dx,dy,dz])=>getBlock(dim,x+dx,y+dy,z+dz)==="torch");
+      state.automation[`${dim}:${key}`]={powered};
     }
-  }catch(e){ console.error('World load failed:',e); }
-  blocks=generateWorld(); saveNow(); console.log(`Generated world: ${blocks.size} blocks`);
-}
-let saveQueued=false;
-function saveNow(){
-  if(!blocks) return;
-  saveQueued=false;
-  const tmp=WORLD_FILE+'.tmp';
-  fs.writeFileSync(tmp,JSON.stringify({version:2,blocks:[...blocks],players,containers,gameTime}));
-  fs.renameSync(tmp,WORLD_FILE);
-}
-function saveSoon(){ if(saveQueued)return; saveQueued=true; setTimeout(saveNow,700); }
-loadWorld();
-setInterval(saveNow,15000);
-process.on('SIGTERM',()=>{ try{saveNow();}finally{process.exit(0);} });
-process.on('SIGINT',()=>{ try{saveNow();}finally{process.exit(0);} });
+  }
 
-const active=new Map();
-function cleanName(v){ return String(v||'').trim().replace(/[^A-Za-z0-9_\- ]/g,'').slice(0,20); }
-function cleanChat(v){ return String(v||'').replace(/[\u0000-\u001F\u007F]/g,'').trim().slice(0,140); }
-function safeNum(v,a,b,d=0){ v=Number(v); return Number.isFinite(v)?Math.max(a,Math.min(b,v)):d; }
-function safeState(s){
-  if(!s||!Array.isArray(s.pos)||s.pos.length!==3) return null;
-  const base=defaultPlayer(), inv={}, dur={};
-  for(const [k,v] of Object.entries(s.inventory||{})) if(/^[a-z0-9_]+$/.test(k)) inv[k]=Math.max(0,Math.min(9999,Math.floor(Number(v)||0)));
-  for(const [k,v] of Object.entries(s.durability||{})) if(/^[a-z0-9_]+$/.test(k)) dur[k]=Math.max(0,Math.min(10000,Math.floor(Number(v)||0)));
-  return {
-    pos:[safeNum(s.pos[0],-80,80),safeNum(s.pos[1],-15,40,8),safeNum(s.pos[2],-80,80)],
-    yaw:safeNum(s.yaw,-1000,1000),health:safeNum(s.health,0,20,20),hunger:safeNum(s.hunger,0,20,20),
-    selectedSlot:Math.floor(safeNum(s.selectedSlot,0,8,0)), inventory:{...base.inventory,...inv}, durability:{...base.durability,...dur}, updatedAt:Date.now()
-  };
+  for(const dim of DIMENSIONS) io.to(dim).emit("tick",{time:state.dimensions[dim].time,weather:state.dimensions[dim].weather,entities:state.entities,crops:state.crops,automation:state.automation});
 }
-function playerNearBlock(state,x,y,z,dist=7){
-  if(!state?.pos)return false; const dx=state.pos[0]-x,dy=state.pos[1]-y,dz=state.pos[2]-z; return dx*dx+dy*dy+dz*dz<=dist*dist;
-}
+setInterval(sim,100);
 
-io.use((socket,next)=>{
-  const username=cleanName(socket.handshake.auth?.username); if(username.length<2)return next(new Error('Username must be 2-20 characters.'));
-  const lower=username.toLowerCase(); if(active.has(lower))return next(new Error('That username is already online.'));
-  socket.data.username=username;socket.data.lower=lower;next();
-});
-io.on('connection',socket=>{
-  const username=socket.data.username; active.set(socket.data.lower,socket.id);
-  const state={...defaultPlayer(),...(players[username]||{})}; socket.data.state=state;
-  const online=[]; for(const s of io.sockets.sockets.values()) if(s.id!==socket.id&&s.data.username) online.push({id:s.id,username:s.data.username,state:s.data.state||defaultPlayer()});
-  socket.emit('world:init',{selfId:socket.id,username,blocks:[...blocks],state,players:online,chatHistory:chatHistory.slice(-40),gameTime,worldRadius:WORLD_RADIUS});
-  socket.broadcast.emit('player:join',{id:socket.id,username,state}); io.emit('system:message',`${username} joined the world`);
+const PORT=process.env.PORT||3000;
+server.listen(PORT,()=>console.log("Blockcraft Complete on",PORT));
 
-  socket.on('player:state',raw=>{const s=safeState(raw);if(!s)return;socket.data.state=s;players[username]=s;socket.broadcast.volatile.emit('player:state',{id:socket.id,state:s});});
-  socket.on('block:break',d=>{
-    const x=Math.round(Number(d?.x)),y=Math.round(Number(d?.y)),z=Math.round(Number(d?.z));
-    if(Math.abs(x)>WORLD_RADIUS+6||Math.abs(z)>WORLD_RADIUS+6||y<=MIN_Y||y>MAX_Y||!playerNearBlock(socket.data.state,x,y,z))return;
-    const k=key(x,y,z),type=blocks.get(k);if(!type)return;blocks.delete(k);delete containers[k];io.emit('block:broken',{x,y,z,type,by:username});saveSoon();
-  });
-  socket.on('block:place',d=>{
-    const x=Math.round(Number(d?.x)),y=Math.round(Number(d?.y)),z=Math.round(Number(d?.z)),type=String(d?.type||'');
-    if(Math.abs(x)>WORLD_RADIUS+6||Math.abs(z)>WORLD_RADIUS+6||y<MIN_Y||y>MAX_Y||!VALID_BLOCKS.has(type)||!playerNearBlock(socket.data.state,x,y,z)||blocks.has(key(x,y,z)))return;
-    blocks.set(key(x,y,z),type);if(type==='chest')containers[key(x,y,z)]={type:'chest',items:{}};if(type==='furnace')containers[key(x,y,z)]={type:'furnace',input:null,fuel:0,output:null};io.emit('block:placed',{x,y,z,type,by:username});saveSoon();
-  });
-  socket.on('chat:send',raw=>{const text=cleanChat(raw);if(!text)return;const m={username,text,time:Date.now(),playerId:socket.id};chatHistory.push(m);if(chatHistory.length>60)chatHistory.shift();io.emit('chat:message',m);});
-  socket.on('craft',d=>{ /* inventory is client-managed for responsiveness; authoritative recipes can be moved here later */ });
-  socket.on('disconnect',()=>{active.delete(socket.data.lower);if(socket.data.state)players[username]=socket.data.state;socket.broadcast.emit('player:leave',{id:socket.id,username});io.emit('system:message',`${username} left the world`);saveSoon();});
-});
-
-setInterval(()=>{ gameTime=(gameTime+.0007)%1; io.emit('time:sync',gameTime); },5000);
-server.listen(PORT,'0.0.0.0',()=>console.log(`Blockcraft listening on ${PORT}; data=${WORLD_FILE}`));

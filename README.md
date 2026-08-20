@@ -1,8 +1,36 @@
-# Blockcraft Survival v2
+# Blockcraft Complete
 
-This is a major foundation update for the persistent Railway/GitHub multiplayer game.
+A persistent multiplayer voxel survival sandbox for GitHub + Railway.
 
-## Repository files
+This project implements original Blockcraft versions of:
+- Dropped item entities and pickup
+- Shared synchronized chests
+- Timed server-side furnaces
+- Farmland/crops and crop growth
+- Animals
+- Hostile mobs with chase AI
+- Boss encounter
+- Armor/equipment state
+- Bows and projectiles
+- Water/lava blocks with compact server-side spreading fluid simulation
+- Dynamic day/night lighting and emissive blocks
+- Weather state
+- Procedural terrain, caves, ores, trees
+- Generated village structures and wandering villager NPCs
+- Alternate dimensions
+- Portals
+- Wire/lamp automation state
+- XP/achievement progression and compact enchanting
+- Potion consumption/effects
+- Boats and minecarts
+- Fishing
+- Persistent multiplayer players/world/entities
+- Multiplayer chat + speech bubbles
+- Health/hunger
+- Crafting
+- Mining and block placement
+
+## Files
 
 ```text
 .gitignore
@@ -15,54 +43,33 @@ style.css
 client.js
 ```
 
-## Included in this build
+## Railway
 
-- Persistent multiplayer world and player state
-- Username login
-- Translucent multiplayer chat
-- Speech bubbles above players
-- Improved player models
-- Procedural original pixel-style block textures
-- Plains, forest, desert and snow terrain
-- Basic caves
-- Coal and iron ore generation
-- Trees
-- 9-slot hotbar
-- Inventory screen
-- Recipe crafting
-- Wooden, stone and iron pickaxes
-- Axes and swords as inventory/tool items
-- Tool durability
-- Tool-aware mining speeds
-- Mining progress bar
-- Cobblestone drops from stone
-- Coal and iron progression
-- Crafting tables, furnaces, chests, torches and glass as placeable blocks
-- Health, hunger, sprinting, jumping and fall damage
-- Day/night cycle
-- Persistent block placement and mining
-- Railway volume-compatible saves
+1. Push these files to GitHub.
+2. Connect that repository to Railway.
+3. Add a Railway Volume mounted at `/data`.
+4. Add variable `DATA_DIR=/data`.
+5. Generate a public domain.
+6. Railway runs `npm start`.
 
-## Railway persistence
+Persistent state is stored at `/data/world.json`.
 
-Keep your Railway Volume mounted at:
+## Controls
 
-```text
-/data
-```
+- WASD: move
+- Space: jump/swim up
+- Shift: sprint
+- Left click: mine / attack
+- Right click: place / use
+- 1-9: hotbar
+- E: inventory/crafting
+- Enter: multiplayer chat
+- G: achievements
+- F: bow / vehicle / fishing rod / food action
+- R: healing potion
+- Q: drop selected item
 
-and keep the variable:
+## Scope
 
-```text
-DATA_DIR=/data
-```
+This is an original browser voxel game. It does not use Minecraft textures, sounds, code, maps, UI assets, or other copyrighted game assets. The implemented systems are compact browser-game equivalents, not a claim of feature-for-feature parity with the commercial Minecraft codebase.
 
-The server writes `/data/world.json`.
-
-## Deployment
-
-Upload/replace these files in GitHub. Railway should automatically redeploy.
-
-## Important scope note
-
-This is a foundation for a Minecraft-class voxel survival game, not literal feature parity with Minecraft. Large systems still to build include authoritative item drops, full chest UI/storage synchronization, timed furnace processing, agriculture, fluid simulation, lighting propagation, weather, hostile/passive mob AI, armor, ranged combat, enchantment-like progression, generated structures, villages/NPCs, portals/dimensions, automation circuitry, advanced world streaming/chunks, sound/music, achievements, and bosses.

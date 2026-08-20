@@ -1,48 +1,74 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Blockcraft Survival</title>
-<link rel="stylesheet" href="/style.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Blockcraft Complete</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div id="hud">
-  <div id="debug">Blockcraft Survival <span id="online">0 online</span></div>
-  <div id="crosshair">+</div>
-  <div id="bars"><span id="health">❤ 20</span><span id="hunger">◆ 20</span><span id="timeLabel">Day</span></div>
-  <div id="mineBar"><div></div></div>
-  <div id="hotbar"></div>
-</div>
-<div id="chatWrap"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…" /></div>
-<div id="toast"></div>
-
-<div id="login" class="screen">
- <div class="panel loginPanel">
-  <div class="logo">BLOCKCRAFT</div>
-  <p>Persistent Multiplayer Survival</p>
-  <input id="username" maxlength="20" placeholder="Username" autocomplete="off" />
-  <button id="joinBtn">Join World</button>
-  <div id="loginError" class="error"></div>
-  <div class="help">WASD move · Space jump · Shift sprint · Left hold mine · Right place/use · E inventory · Enter chat</div>
- </div>
-</div>
-
-<div id="pause" class="screen hidden">
- <div class="panel"><h2>Game Paused</h2><button id="resumeBtn">Back to Game</button></div>
-</div>
-
-<div id="inventoryScreen" class="screen hidden">
- <div class="inventoryPanel panel">
-  <div class="panelTitle"><h2>Inventory & Crafting</h2><button id="closeInventory">×</button></div>
-  <div class="inventoryLayout">
-    <section><h3>Inventory</h3><div id="inventoryGrid" class="grid"></div></section>
-    <section><h3>Recipes</h3><div id="recipeList"></div></section>
+  <div id="login" class="screen">
+    <div class="panel login-panel">
+      <h1>BLOCKCRAFT</h1>
+      <p>Persistent multiplayer survival world</p>
+      <input id="username" maxlength="16" placeholder="Username">
+      <button id="joinBtn">Join world</button>
+      <div id="loginError"></div>
+    </div>
   </div>
- </div>
-</div>
 
-<script src="/socket.io/socket.io.js"></script>
-<script type="module" src="/client.js"></script>
+  <div id="hud" class="hidden">
+    <div id="stats">
+      <div id="health"></div>
+      <div id="armor"></div>
+      <div id="hunger"></div>
+      <div id="effects"></div>
+    </div>
+    <div id="objective"></div>
+    <div id="crosshair">+</div>
+    <div id="mineBar"><div id="mineFill"></div></div>
+    <div id="hotbar"></div>
+    <div id="weatherLabel"></div>
+    <div id="dimensionLabel"></div>
+    <div id="achievementToast"></div>
+  </div>
+
+  <div id="chatWrap" class="hidden">
+    <div id="chatLog"></div>
+    <input id="chatInput" maxlength="120" placeholder="Press Enter to chat">
+  </div>
+
+  <div id="inventoryScreen" class="modal hidden">
+    <div class="panel wide">
+      <div class="modal-head"><h2>Inventory & Crafting</h2><button data-close="inventoryScreen">×</button></div>
+      <div id="equipment"></div>
+      <div id="inventoryGrid"></div>
+      <h3>Crafting</h3>
+      <div id="craftRecipes"></div>
+    </div>
+  </div>
+
+  <div id="containerScreen" class="modal hidden">
+    <div class="panel wide">
+      <div class="modal-head"><h2 id="containerTitle">Container</h2><button data-close="containerScreen">×</button></div>
+      <div id="containerBody"></div>
+    </div>
+  </div>
+
+  <div id="achievementsScreen" class="modal hidden">
+    <div class="panel wide">
+      <div class="modal-head"><h2>Achievements</h2><button data-close="achievementsScreen">×</button></div>
+      <div id="achievementList"></div>
+    </div>
+  </div>
+
+  <div id="help" class="hidden">
+    WASD move · Space jump · Shift sprint · Left click mine/attack · Right click place/use ·
+    1-9 hotbar · E inventory · Enter chat · G achievements · F fish/use vehicle · R potion ·
+    Q drop item · P portal debug recipe hint
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/client.js"></script>
 </body>
 </html>

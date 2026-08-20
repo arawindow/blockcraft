@@ -1,16 +1,13 @@
 {
-  "name": "blockcraft-survival",
-  "version": "2.0.0",
+  "name": "blockcraft-complete",
+  "version": "3.0.0",
   "private": true,
-  "description": "Persistent multiplayer voxel survival sandbox",
-  "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
-  "engines": { "node": ">=18" },
   "dependencies": {
-    "express": "^5.1.0",
+    "express": "^4.21.2",
     "socket.io": "^4.8.1"
   }
 }
